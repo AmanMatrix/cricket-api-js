@@ -1,8 +1,6 @@
 const axios = require("axios");
-const cheerio = require("cheerio");
-const scrape = require("../scrape");
+require("dotenv").config();
 
-// 🔥 SYSTEM PROMPT (STRICT JSON OUTPUT)
 const SYSTEM_PROMPT = `
 You are a cricket data extraction engine.
 
@@ -14,6 +12,7 @@ Rules:
 - If any field is missing, return null for that field
 - Do NOT hallucinate data
 - Prefer scoreboard patterns like "152/3 in 17.2 overs"
+- Also calculate the win probability for the batting team
 
 Extract this EXACT schema:
 
@@ -27,47 +26,45 @@ Extract this EXACT schema:
   "overs": 0.0,
   "run_rate": 0.0,
   "target": null,
-  "status": ""
+  "status": "",
+  "win_probability":""
 }
 `;
-
 async function processUrl(url) {
-  // ✅ wait for scraping to complete
+  const scrape = require("../scrape");
   let text = await scrape(url);
-  // console.log(text)
 
-  const aiResponse = await axios.post(
-    "https://openrouter.ai/api/v1/chat/completions",
-    {
-      model: "nvidia/nemotron-3-super-120b-a12b:free",
-      temperature: 0,
-      messages: [
-        {
-          role: "system",
-          content: SYSTEM_PROMPT,
-        },
-        {
-          role: "user",
-          content: text,
-        },
-      ],
-    },
-    {
-      headers: {
-        Authorization: `Bearer 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`, // safer
-        "Content-Type": "application/json",
-      },
-    }
-  );
+  if (!text) return { error: "No text content found" };
 
-  let result;
   try {
-    result = JSON.parse(aiResponse.data.choices[0].message.content);
-  } catch (e) {
-    result = { error: "Invalid JSON from AI", raw: aiResponse.data };
-  }
+    const aiResponse = await axios.post(
+      "https://openrouter.ai/api/v1/chat/completions",
+      {
+        model: "nvidia/nemotron-3-super-120b-a12b:free",
+        temperature: 0,
+        messages: [
+          { role: "system", content: SYSTEM_PROMPT },
+          { role: "user", content: text },
+        ], 
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+      },
+    );
 
-  return result;
+    const rawContent = aiResponse.data.choices[0].message.content;
+
+    // Regex to find the JSON object inside the string
+    const jsonMatch = rawContent.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) throw new Error("No JSON found in AI response");
+
+    return JSON.parse(jsonMatch[0]);
+  } catch (e) {
+    return { error: "Processing failed", detail: e.message };
+  }
 }
 
 module.exports = { processUrl };
