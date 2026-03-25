@@ -1,70 +1,36 @@
-const axios = require("axios");
-require("dotenv").config();
+const { processUrl } = require("../lib/process");
 
-const SYSTEM_PROMPT = `
-You are a cricket data extraction engine.
+export default async function handler(req, res) {
+  // 1. Handle CORS for Shorya's Frontend / Supabase Edge Functions
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
 
-Your job is to extract ONLY structured cricket match data from given text.
+  if (req.method === "OPTIONS") {
+    return res.status(204).end();
+  }
 
-Rules:
-- Output MUST be valid JSON only
-- No explanation, no extra text
-- If any field is missing, return null for that field
-- Do NOT hallucinate data
-- Prefer scoreboard patterns like "152/3 in 17.2 overs"
-- Also calculate the win probability for the batting team
+  // 2. Reject non-POST requests
+  if (req.method !== "POST") {
+    return res.status(405).json({ error: "Method not allowed. Use POST." });
+  }
 
-Extract this EXACT schema:
+  // 3. Extract payload
+  const { url, prompt, model } = req.body;
 
-{
-  "team_1": "",
-  "team_2": "",
-  "batting_team": "",
-  "bowling_team": "",
-  "score": 0,
-  "wickets": 0,
-  "overs": 0.0,
-  "run_rate": 0.0,
-  "target": null,
-  "status": "",
-  "win_probability":""
-}
-`;
-async function processUrl(url) {
-  const scrape = require("../scrape");
-  let text = await scrape(url);
-
-  if (!text) return { error: "No text content found" };
+  if (!url || !prompt) {
+    return res.status(400).json({ error: "Both 'url' and 'prompt' are required." });
+  }
 
   try {
-    const aiResponse = await axios.post(
-      "https://openrouter.ai/api/v1/chat/completions",
-      {
-        model: "nvidia/nemotron-3-super-120b-a12b:free",
-        temperature: 0,
-        messages: [
-          { role: "system", content: SYSTEM_PROMPT },
-          { role: "user", content: text },
-        ], 
-      },
-      {
-        headers: {
-          Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
-          "Content-Type": "application/json",
-        },
-      },
-    );
-
-    const rawContent = aiResponse.data.choices[0].message.content;
-
-    // Regex to find the JSON object inside the string
-    const jsonMatch = rawContent.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) throw new Error("No JSON found in AI response");
-
-    return JSON.parse(jsonMatch[0]);
-  } catch (e) {
-    return { error: "Processing failed", detail: e.message };
+    console.log(`[VERCEL API] Processing request for: ${url}`);
+    
+    // Call your existing logic
+    const result = await processUrl(url, prompt, model);
+    
+    return res.status(200).json(result);
+  } catch (error) {
+    console.error("[VERCEL API ERROR]", error);
+    return res.status(500).json({ error: "Internal Server Error", details: error.message });
   }
 }
-
-module.exports = { processUrl };
